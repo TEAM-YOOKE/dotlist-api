@@ -1,9 +1,24 @@
-const { onSchedule } = require("firebase-functions/v2/scheduler");
+const functions = require("firebase-functions"); // Import v1 of Firebase functions
 const admin = require("firebase-admin");
+const nodemailer = require("nodemailer");
 
 admin.initializeApp();
 
-exports.sendDeadlineNotification = onSchedule("every 1 minutes", async () => {
+// Access environment variables
+const emailUser = functions.config().email.user;
+const emailPass = functions.config().email.pass;
+
+// Configure nodemailer transporter for email notifications
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: emailUser, // Replace with your email
+        pass: emailPass // Replace with your email password or use an App Password
+    }
+});
+
+// Scheduled Function: Send FCM deadline notifications every minute
+exports.sendDeadlineNotification = functions.pubsub.schedule('every 1 minutes').onRun(async (context) => {
     const now = new Date();
     const fiveMinutesLater = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes from now
 
@@ -37,6 +52,7 @@ exports.sendDeadlineNotification = onSchedule("every 1 minutes", async () => {
                 const userData = userDoc.data();
                 const userToken = userData.token; // Retrieve the token field from the user document
 
+                // Send FCM notification if user token is found
                 if (userToken) {
                     const message = {
                         token: userToken,
@@ -51,9 +67,12 @@ exports.sendDeadlineNotification = onSchedule("every 1 minutes", async () => {
                         },
                     };
 
-                    // Send notification using the v1 API with the new method `send()`
-                    const response = await admin.messaging().send(message);
-                    console.log("Notification sent successfully:", response);
+                    try {
+                        const response = await admin.messaging().send(message);
+                        console.log("Notification sent successfully:", response);
+                    } catch (error) {
+                        console.error("Error sending notification:", error);
+                    }
                 } else {
                     console.log("No token found for user with userId:", todo.userId);
                 }
@@ -61,5 +80,45 @@ exports.sendDeadlineNotification = onSchedule("every 1 minutes", async () => {
         });
     } catch (error) {
         console.error("Error sending notification:", error);
+    }
+});
+
+// Firestore Trigger: Send email when a new task is added
+exports.newSendEmailOnTaskAdd = functions.firestore.document('todos/{todoId}').onCreate(async (snapshot, context) => {
+    const newTodo = snapshot.data(); // The newly added task
+    const userId = newTodo.userId;
+
+    try {
+        // Fetch the user document using the userId from the todo document
+        const userDoc = await admin.firestore().collection("users").doc(userId).get();
+
+        if (!userDoc.exists) {
+            console.log("User document not found for userId:", userId);
+            return;
+        }
+
+        const userData = userDoc.data();
+        const userEmail = userData.email; // Retrieve the email from the user document
+
+        // Send email notification if user email is found
+        if (userEmail) {
+            const mailOptions = {
+                from: emailUser, // Your email address
+                to: userEmail,
+                subject: "New Task Added on DotList!",
+                text: `You have successfully added a new task: "${newTodo.title}".`
+            };
+
+            try {
+                const info = await transporter.sendMail(mailOptions);
+                console.log('Email sent successfully:', info.response);
+            } catch (emailError) {
+                console.error('Error sending email:', emailError);
+            }
+        } else {
+            console.log("No email found for userId:", userId);
+        }
+    } catch (error) {
+        console.error("Error sending email:", error);
     }
 });

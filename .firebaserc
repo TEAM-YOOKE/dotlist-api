@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "yookie-wqzrfr"
-  }
+    "default": "yookie-wqzrfr",
+    "todo": "yookie-wqzrfr"
+  },
+  "targets": {},
+  "etags": {}
 }
